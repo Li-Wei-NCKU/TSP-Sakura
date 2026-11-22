@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>施工進度紀錄</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #1f2126;
+    --panel: rgba(20, 22, 26, 0.82);
+    --line: rgba(255, 255, 255, 0.12);
+    --text: #f2f3f5;
+    --muted: #a9adb5;
+    --accent: #ff7a1a;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "PingFang TC", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+  .top {
+    position: fixed; top: 12px; left: 12px; right: 12px; display: flex; align-items: flex-start; gap: 10px; pointer-events: none;
+  }
+  .top > * { pointer-events: auto; }
+  .title-box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-right: auto; min-width: 0; }
+  .title { font-size: 20px; font-weight: 700; line-height: 1.3; }
+  .subtitle { font-size: 14px; color: var(--muted); margin-top: 4px; }
+
+  /* date boxes: two rows "label | date", same size for both rows */
+  .dates {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+    display: grid; grid-template-columns: auto auto; column-gap: 14px; row-gap: 4px; align-items: baseline;
+  }
+  .dates .k { font-size: 16px; color: #c9ccd3; font-weight: 500; white-space: nowrap; }
+  .dates .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; letter-spacing: 0.3px; }
+  body.compare .epoch-now { display: none; }
+
+  .cmp-toggle, .bm-toggle {
+    height: 52px; border-radius: 10px; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px;
+    white-space: nowrap; flex: none;
+  }
+  .cmp-toggle {
+    padding: 0 18px; border: 2px solid var(--accent); background: var(--accent); color: #111;
+    font-size: 17px; font-weight: 700; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+  .cmp-toggle .ico { font-size: 20px; line-height: 1; }
+  .cmp-toggle:hover { filter: brightness(1.08); }
+  .cmp-toggle:disabled { opacity: 0.35; cursor: default; }
+  body.compare .cmp-toggle { background: rgba(20, 22, 26, 0.9); color: var(--text); }
+  .bm-toggle { padding: 0 14px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 16px; font-weight: 600; }
+  .bm-toggle .sw { width: 34px; height: 20px; border-radius: 10px; background: #555; position: relative; transition: background 0.15s; flex: none; }
+  .bm-toggle .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left 0.15s; }
+  .bm-toggle.on .sw { background: #3aa76d; }
+  .bm-toggle.on .sw::after { left: 16px; }
+  .short { display: none; }
+  .title .tl { display: inline; }
+  .one-select { display: none; }
+
+  .bar {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); width: min(980px, calc(100vw - 24px));
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .btn {
+    flex: none; height: 40px; min-width: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, 0.06); color: var(--text); font-size: 16px; cursor: pointer; font-family: inherit;
+  }
+  .btn:hover { background: rgba(255, 255, 255, 0.12); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn.on { background: var(--accent); border-color: var(--accent); color: #111; }
+  .track { flex: 1; overflow-x: auto; scrollbar-width: thin; }
+  .chips { display: flex; gap: 6px; padding: 2px; width: max-content; }
+  .chip {
+    height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--line); background: transparent;
+    color: var(--muted); font-size: 16px; cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums;
+    display: flex; align-items: center; gap: 6px; font-family: inherit;
+  }
+  .chip:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+  .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.35; }
+  .chip.ready .dot { opacity: 1; }
+  .chip.loading .dot { animation: blink 0.9s infinite; opacity: 1; }
+  @keyframes blink { 50% { opacity: 0.15; } }
+
+  .single-only { display: contents; }
+  .compare-only { display: none; }
+  body.compare .single-only { display: none; }
+  body.compare .compare-only { display: flex; }
+  .cmp-ctrl { flex: 1; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .cmp-ctrl label { font-size: 16px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  select {
+    height: 34px; border-radius: 8px; border: 1px solid var(--line); background: #2a2d33; color: var(--text);
+    padding: 0 8px; font-size: 16px; font-family: inherit; font-variant-numeric: tabular-nums; height: 40px;
+  }
+
+  /* swipe divider */
+  .divider { position: fixed; top: 0; bottom: 0; width: 0; display: none; z-index: 5; }
+  body.compare .divider { display: block; }
+  .divider .line { position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: #fff; box-shadow: 0 0 6px rgba(0,0,0,0.6); pointer-events: none; }
+  .divider .handle {
+    position: absolute; top: 50%; left: -22px; width: 44px; height: 44px; margin-top: -22px; border-radius: 50%;
+    background: #fff; color: #222; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700;
+    cursor: ew-resize; box-shadow: 0 2px 10px rgba(0,0,0,0.5); touch-action: none;
+  }
+  .side-tag {
+    position: fixed; top: 100px; z-index: 5; display: none; pointer-events: none;
+    background: rgba(20, 22, 26, 0.9); border-color: rgba(255, 255, 255, 0.25); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  }
+  body.compare .side-tag { display: grid; }
+  .side-tag.left { left: 12px; border-top: 4px solid #ff9a52; }
+  .side-tag.right { right: 12px; border-top: 4px solid #5aa9ff; }
+  .side-tag.left .v { color: #ffd2b0; }
+  .side-tag.right .v { color: #b9dcff; }
+
+  .status {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 18px; font-size: 16px; display: none; align-items: center; gap: 10px; z-index: 6;
+  }
+  .status.show { display: flex; }
+  .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .attrib {
+    position: fixed; right: 8px; bottom: 4px; font-size: 11px; color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 0 3px #000; pointer-events: none; text-align: right;
+  }
+
+  .edit {
+    position: fixed; right: 12px; top: 90px; width: 300px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 10px; font-size: 12px; display: none; -webkit-user-select: text; user-select: text; z-index: 7;
+  }
+  .edit.show { display: block; }
+  .edit pre { margin: 8px 0; padding: 8px; background: rgba(0, 0, 0, 0.35); border-radius: 6px; white-space: pre-wrap; word-break: break-all; font-size: 11px; }
+
+  @media (max-width: 600px) {
+    /* row 1: title + buttons, row 2: dates across the full width */
+    .top { flex-wrap: wrap; gap: 8px; top: 8px; left: 8px; right: 8px; }
+    .title-box { flex: 1 1 0; padding: 8px 10px; }
+    .title { font-size: 15px; }
+    .title .tl { display: block; }
+    .subtitle { display: none; }
+    .cmp-toggle, .bm-toggle { height: 44px; font-size: 15px; padding: 0 10px; gap: 6px; }
+    .cmp-toggle .ico { font-size: 17px; }
+    .long { display: none; }
+    .short { display: inline; }
+    .epoch-now { flex: 1 1 100%; order: 3; grid-template-columns: auto auto; justify-content: start; padding: 6px 12px; column-gap: 12px; row-gap: 2px; }
+    .epoch-now .v { text-align: left; }
+    .dates .k { font-size: 13px; }
+    .dates .v { font-size: 17px; }
+
+    /* compare: each tag on its own half, label above date */
+    .side-tag { top: 70px; grid-template-columns: auto; row-gap: 0; padding: 6px 10px; max-width: calc(50vw - 16px); }
+    .side-tag .v { text-align: left; margin-bottom: 4px; }
+    .side-tag .v:last-child { margin-bottom: 0; }
+    .side-tag.left { left: 8px; }
+    .side-tag.right { right: 8px; }
+
+    .btn { height: 40px; font-size: 15px; }
+    .track { display: none; }
+    .one-select { display: block; flex: 1; min-width: 0; height: 40px; font-size: 17px; font-weight: 700; text-align: center; text-align-last: center; }
+    select { height: 36px; font-size: 15px; }
+    .cmp-ctrl label { font-size: 14px; }
+    .bar { padding: 8px; gap: 6px; bottom: 30px; }
+    .hide-sm { display: none; }
+    .attrib { left: 8px; font-size: 9px; }
+    .attrib .rel { display: none; }
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="top">
+  <div class="title-box">
+    <div class="title" id="title"></div>
+    <div class="subtitle" id="subtitle"></div>
+  </div>
+  <button class="bm-toggle on" id="bmBtn" title="顯示／隱藏衛星底圖（B）"><span class="sw"></span><span class="long">衛星底圖</span><span class="short">底圖</span></button>
+  <button class="cmp-toggle" id="cmp" title="左右拉桿對照（C）"><span class="ico">⇔</span><span class="long" id="cmpLong">左右對照</span><span class="short" id="cmpShort">對照</span></button>
+  <div class="epoch-now dates">
+    <span class="k">空拍建模日期</span><span class="v" id="epochNow">—</span>
+    <span class="k sat">衛星影像版本</span><span class="v sat" id="satNow">—</span>
+  </div>
+</div>
+
+<div class="side-tag left dates">
+  <span class="k">空拍建模日期</span><span class="v" id="tagL"></span>
+  <span class="k sat">衛星影像版本</span><span class="v sat" id="satL"></span>
+</div>
+<div class="side-tag right dates">
+  <span class="k">空拍建模日期</span><span class="v" id="tagR"></span>
+  <span class="k sat">衛星影像版本</span><span class="v sat" id="satR"></span>
+</div>
+
+<div class="divider" id="divider">
+  <div class="line"></div>
+  <div class="handle" id="handle">⇔</div>
+</div>
+
+<div class="status" id="status"><div class="spinner"></div><span id="statusText">載入中…</span></div>
+
+<div class="bar">
+  <div class="single-only">
+    <button class="btn" id="prev" title="上一期（←）">◀</button>
+    <div class="track" id="track"><div class="chips" id="chips"></div></div>
+    <select id="selOne" class="one-select" aria-label="選擇期別"></select>
+    <button class="btn" id="next" title="下一期（→）">▶</button>
+    <button class="btn" id="play" title="自動播放（空白鍵）">播放</button>
+  </div>
+  <div class="compare-only cmp-ctrl">
+    <label>左 <select id="selL"></select></label>
+    <label>右 <select id="selR"></select></label>
+  </div>
+  <button class="btn hide-sm" id="reset" title="回到初始視角（R）">重設視角</button>
+</div>
+
+<div class="attrib" id="attrib"></div>
+
+<div class="edit" id="edit">
+  <b>目前視角</b>（貼到 config.json 的 "camera"）
+  <pre id="camText"></pre>
+  <button class="btn" id="copyCam">複製</button>
+</div>
+
+<script type="module">
+import * as pc from './lib/playcanvas.min.mjs';
+
+const $ = (id) => document.getElementById(id);
+const config = await (await fetch('config.json', { cache: 'no-cache' })).json();
+const epochs = config.epochs || [];
+const CACHE_RADIUS = config.cacheRadius ?? 1;          // single mode: keep current ± N epochs in GPU memory
+const PLAY_INTERVAL = (config.playSeconds ?? 2.5) * 1000;
+const editMode = new URLSearchParams(location.search).has('edit');
+
+document.title = config.title || document.title;
+// titleLines: one line on desktop, one line per item on phones
+if (Array.isArray(config.titleLines) && config.titleLines.length) {
+  $('title').innerHTML = '';
+  config.titleLines.forEach((t) => { const sp = document.createElement('span'); sp.className = 'tl'; sp.textContent = t; $('title').append(sp); });
+} else {
+  $('title').textContent = config.title || '';
+}
+$('subtitle').textContent = config.subtitle || '';
+
+// ================================================================= app & cameras
+const canvas = $('c');
+const app = new pc.Application(canvas, { graphicsDeviceOptions: { antialias: false, alpha: false } });
+app.setCanvasFillMode(pc.FILLMODE_FILL_WINDOW);
+app.setCanvasResolution(pc.RESOLUTION_AUTO);
+app.graphicsDevice.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+window.addEventListener('resize', () => app.resizeCanvas());
+app.start();
+
+// one layer per side; each camera renders only its own side
+const layerL = new pc.Layer({ name: 'SideL' });
+const layerR = new pc.Layer({ name: 'SideR' });
+app.scene.layers.push(layerL);
+app.scene.layers.push(layerR);
+
+const bg = config.background || [0.12, 0.13, 0.15];
+function makeCamera(name, layer, priority) {
+  const e = new pc.Entity(name);
+  e.addComponent('camera', {
+    clearColor: new pc.Color(bg[0], bg[1], bg[2]),
+    fov: config.camera?.fov ?? 50,
+    nearClip: 0.5,
+    farClip: 8000,
+    layers: [layer.id],
+    priority
+  });
+  e.camera.camera._scissorRectClear = true;   // scissor applies to clear and draw
+  app.root.addChild(e);
+  return e;
+}
+const camL = makeCamera('cameraL', layerL, 0);
+const camR = makeCamera('cameraR', layerR, 1);
+camR.enabled = false;
+
+const modelRoot = new pc.Entity('models');
+const rot = config.modelRotation || [0, 0, 180];
+modelRoot.setLocalEulerAngles(rot[0], rot[1], rot[2]);
+app.root.addChild(modelRoot);
+
+const groundRoot = new pc.Entity('basemaps');
+app.root.addChild(groundRoot);
+
+// ================================================================= orbit camera
+const home = {
+  target: new pc.Vec3(...(config.camera?.target || [0, 0, 0])),
+  yaw: config.camera?.yaw ?? 35,
+  pitch: config.camera?.pitch ?? -25,
+  get distance() {
+    // the field of view is vertical, so a tall phone screen sees less width: move back (up to 1.8x)
+    const aspect = (canvas.clientWidth || 1) / (canvas.clientHeight || 1);
+    const k = aspect < 1 ? Math.min(config.camera?.portraitMaxFactor ?? 1.8, 1 / aspect) : 1;
+    return (config.camera?.distance ?? 220) * k;
+  }
+};
+const cam = { target: home.target.clone(), yaw: home.yaw, pitch: home.pitch, distance: home.distance };
+const goal = { target: home.target.clone(), yaw: home.yaw, pitch: home.pitch, distance: home.distance };
+const tmp = new pc.Vec3();
+
+function applyCamera() {
+  camL.setEulerAngles(cam.pitch, cam.yaw, 0);
+  tmp.copy(camL.forward).mulScalar(-cam.distance).add(cam.target);
+  camL.setPosition(tmp);
+  camR.setPosition(tmp);
+  camR.setRotation(camL.getRotation());
+}
+
+app.on('update', (dt) => {
+  const k = 1 - Math.exp(-dt * 12);
+  cam.yaw += (goal.yaw - cam.yaw) * k;
+  cam.pitch += (goal.pitch - cam.pitch) * k;
+  cam.distance += (goal.distance - cam.distance) * k;
+  cam.target.lerp(cam.target, goal.target, k);
+  applyCamera();
+  if (editMode) updateEditPanel();
+});
+
+function rotateBy(dx, dy) {
+  goal.yaw -= dx * 0.25;
+  goal.pitch = pc.math.clamp(goal.pitch - dy * 0.25, -89, 89);
+}
+function panBy(dx, dy) {
+  const h = canvas.clientHeight || 1;
+  const scale = (2 * goal.distance * Math.tan((camL.camera.fov * Math.PI) / 360)) / h;
+  goal.target.add(camL.right.clone().mulScalar(-dx * scale)).add(camL.up.clone().mulScalar(dy * scale));
+}
+function zoomBy(f) { goal.distance = pc.math.clamp(goal.distance * f, 2, 3000); }
+function resetView() { goal.target.copy(home.target); goal.yaw = home.yaw; goal.pitch = home.pitch; goal.distance = home.distance; }
+
+let drag = null;
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+canvas.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  canvas.setPointerCapture(e.pointerId);
+  drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.button === 1 || e.shiftKey || e.ctrlKey };
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerType !== 'mouse') return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  drag.x = e.clientX; drag.y = e.clientY;
+  drag.pan ? panBy(dx, dy) : rotateBy(dx, dy);
+});
+canvas.addEventListener('pointerup', () => { drag = null; });
+canvas.addEventListener('wheel', (e) => { e.preventDefault(); zoomBy(Math.exp(e.deltaY * 0.0012)); }, { passive: false });
+
+let touches = [];
+const tp = (t) => ({ x: t.clientX, y: t.clientY });
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); touches = [...e.touches].map(tp); }, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  e.preventDefault();
+  const now = [...e.touches].map(tp);
+  if (now.length === 1 && touches.length === 1) {
+    rotateBy(now[0].x - touches[0].x, now[0].y - touches[0].y);
+  } else if (now.length >= 2 && touches.length >= 2) {
+    const d0 = Math.hypot(touches[0].x - touches[1].x, touches[0].y - touches[1].y);
+    const d1 = Math.hypot(now[0].x - now[1].x, now[0].y - now[1].y);
+    if (d0 > 0 && d1 > 0) zoomBy(d0 / d1);
+    panBy((now[0].x + now[1].x - touches[0].x - touches[1].x) / 2, (now[0].y + now[1].y - touches[0].y - touches[1].y) / 2);
+  }
+  touches = now;
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => { touches = [...e.touches].map(tp); }, { passive: false });
+
+// ================================================================= dates
+// "113/11/23" (ROC) or "2024-11-23" -> Date (UTC)
+function epochDate(ep) {
+  const s = ep.date || ep.label || '';
+  const m = s.match(/(\d{2,4})\D+(\d{1,2})\D+(\d{1,2})/);
+  if (!m) return null;
+  let y = +m[1];
+  if (y < 1911) y += 1911;
+  return new Date(Date.UTC(y, +m[2] - 1, +m[3]));
+}
+const fmtDate = (d) => d ? d.toISOString().slice(0, 10) : '';
+// ROC style, same as the epoch labels: 2026-11-18 -> 115/11/18
+const fmtRoc = (d) => d ? `${d.getUTCFullYear() - 1911}/${String(d.getUTCMonth() + 1).padStart(2, '0')}/${String(d.getUTCDate()).padStart(2, '0')}` : '';
+function satText(i) {
+  const r = releaseFor(i);
+  if (!r) return '—';
+  return r.date ? fmtRoc(r.date) : '最新影像';
+}
+
+// ================================================================= satellite basemap
+const bm = config.basemap || {};
+const geo = config.geo;   // { lat, lon } of the shared origin
+const basemapOn = !!(geo && bm.source !== 'none');
+const GROUND_Y = config.groundY ?? 0;
+const FALLBACK = {
+  id: 'esri-current', date: null, label: 'Esri World Imagery',
+  url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{level}/{row}/{col}'
+};
+let releases = null;   // [{ id, date, url, label }]
+
+async function loadReleases() {
+  if (!basemapOn) return [];
+  if (bm.source === 'esri') return [FALLBACK];
+  if (bm.source === 'custom') return [{ id: 'custom', date: null, label: bm.attribution || '', url: bm.url }];
+  try {
+    const res = await fetch(bm.waybackConfig || 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json');
+    const json = await res.json();
+    const list = [];
+    for (const [id, item] of Object.entries(json)) {
+      const m = (item.itemTitle || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (!m || !item.itemURL) continue;
+      list.push({ id, date: new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])), url: item.itemURL, label: 'Esri World Imagery Wayback' });
+    }
+    if (!list.length) throw new Error('empty wayback config');
+    return list;
+  } catch (err) {
+    console.warn('Wayback config unavailable, using current imagery', err);
+    return [FALLBACK];
+  }
+}
+
+// imagery release for an epoch: explicit config override, else closest release date
+function releaseFor(i) {
+  if (!releases || !releases.length) return null;
+  const ep = epochs[i];
+  if (ep.basemapRelease != null) {
+    const r = releases.find((x) => String(x.id) === String(ep.basemapRelease));
+    if (r) return r;
+  }
+  const d = epochDate(ep);
+  if (!d || releases.length === 1) return releases[0];
+  let best = releases[0], bestDiff = Infinity;
+  for (const r of releases) {
+    if (!r.date) continue;
+    const diff = Math.abs(r.date - d);
+    if (diff < bestDiff) { best = r; bestDiff = diff; }
+  }
+  return best;
+}
+
+// local ENU (metres) <-> lat/lon around the origin, WGS84 radii of curvature
+const A = 6378137, E2 = 0.00669437999014;
+const lat0 = geo ? geo.lat * Math.PI / 180 : 0;
+const sin0 = Math.sin(lat0);
+const RN = A / Math.sqrt(1 - E2 * sin0 * sin0);
+const RM = A * (1 - E2) / Math.pow(1 - E2 * sin0 * sin0, 1.5);
+const toEast = (lon) => (lon - geo.lon) * Math.PI / 180 * RN * Math.cos(lat0);
+const toNorth = (lat) => (lat - geo.lat) * Math.PI / 180 * RM;
+const tileLon = (x, z) => x / 2 ** z * 360 - 180;
+const tileLat = (y, z) => Math.atan(Math.sinh(Math.PI * (1 - 2 * y / 2 ** z))) * 180 / Math.PI;
+const lonTile = (lon, z) => Math.floor((lon + 180) / 360 * 2 ** z);
+const latTile = (lat, z) => {
+  const r = lat * Math.PI / 180;
+  return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * 2 ** z);
+};
+
+const basemaps = new Map();   // release id -> { entity, tiles: [entity] }
+
+function buildBasemap(rel) {
+  if (basemaps.has(rel.id)) return basemaps.get(rel.id);
+  const z = bm.zoom ?? 18;
+  const radius = bm.radius ?? 600;
+  const dLat = radius / RM * 180 / Math.PI;
+  const dLon = radius / (RN * Math.cos(lat0)) * 180 / Math.PI;
+  const x0 = lonTile(geo.lon - dLon, z), x1 = lonTile(geo.lon + dLon, z);
+  const y0 = latTile(geo.lat + dLat, z), y1 = latTile(geo.lat - dLat, z);
+  const group = new pc.Entity('basemap-' + rel.id);
+  groundRoot.addChild(group);
+  const item = { entity: group, tiles: [], layers: [] };
+  const device = app.graphicsDevice;
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      const w = toEast(tileLon(tx, z)), e = toEast(tileLon(tx + 1, z));
+      const n = toNorth(tileLat(ty, z)), s = toNorth(tileLat(ty + 1, z));
+      // viewer world: X = east, Y = up, Z = -north
+      const mesh = new pc.Mesh(device);
+      mesh.setPositions([w, GROUND_Y, -n,  e, GROUND_Y, -n,  e, GROUND_Y, -s,  w, GROUND_Y, -s]);
+      mesh.setUvs(0, [0, 0, 1, 0, 1, 1, 0, 1]);
+      mesh.setIndices([0, 3, 2, 0, 2, 1]);
+      mesh.update(pc.PRIMITIVE_TRIANGLES);
+      const mat = new pc.StandardMaterial();
+      mat.useLighting = false;
+      mat.useSkybox = false;
+      mat.diffuse = new pc.Color(0, 0, 0);
+      mat.emissive = new pc.Color(0.18, 0.19, 0.2);
+      mat.cull = pc.CULLFACE_NONE;
+      mat.update();
+      const tile = new pc.Entity(`t${tx}_${ty}`);
+      tile.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, mat)], layers: item.layers.slice(), castShadows: false });
+      group.addChild(tile);
+      item.tiles.push(tile);
+
+      const url = rel.url.replace('{level}', z).replace('{row}', ty).replace('{col}', tx)
+        .replace('{z}', z).replace('{y}', ty).replace('{x}', tx);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        if (!tile.render) return;   // destroyed meanwhile
+        const tex = new pc.Texture(device, {
+          format: pc.PIXELFORMAT_SRGBA8, mipmaps: true, anisotropy: 8,
+          minFilter: pc.FILTER_LINEAR_MIPMAP_LINEAR, magFilter: pc.FILTER_LINEAR,
+          addressU: pc.ADDRESS_CLAMP_TO_EDGE, addressV: pc.ADDRESS_CLAMP_TO_EDGE
+        });
+        tex.setSource(img);
+        const k = bm.brightness ?? 1;
+        mat.emissive = new pc.Color(k, k, k);
+        mat.emissiveMap = tex;
+        mat.update();
+        item.textures = (item.textures || []).concat(tex);
+      };
+      img.src = url;
+    }
+  }
+  basemaps.set(rel.id, item);
+  return item;
+}
+
+function destroyBasemap(id) {
+  const item = basemaps.get(id);
+  if (!item) return;
+  item.entity.destroy();
+  (item.textures || []).forEach((t) => t.destroy());
+  basemaps.delete(id);
+}
+
+let basemapVisible = true;
+
+// outline of the model's crop area on the ground, shown with the basemap
+const outline = new pc.Entity('model-outline');
+(function buildOutline() {
+  const b = config.modelBounds;
+  if (!b || !basemapOn) return;
+  const w = (b.width ?? 0.8) / 2, y = GROUND_Y + 0.15;
+  const segs = [   // [x0, z0, x1, z1]
+    [b.xmin, b.zmin, b.xmax, b.zmin], [b.xmax, b.zmin, b.xmax, b.zmax],
+    [b.xmax, b.zmax, b.xmin, b.zmax], [b.xmin, b.zmax, b.xmin, b.zmin]
+  ];
+  const pos = [], idx = [];
+  segs.forEach(([x0, z0, x1, z1], n) => {
+    const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz);
+    const nx = -dz / L * w, nz = dx / L * w;                    // half-width normal
+    const ex = dx / L * w, ez = dz / L * w;                     // extend to close corners
+    pos.push(x0 - ex + nx, y, z0 - ez + nz, x1 + ex + nx, y, z1 + ez + nz,
+             x1 + ex - nx, y, z1 + ez - nz, x0 - ex - nx, y, z0 - ez - nz);
+    const o = n * 4;
+    idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  });
+  const mesh = new pc.Mesh(app.graphicsDevice);
+  mesh.setPositions(pos);
+  mesh.setIndices(idx);
+  mesh.update(pc.PRIMITIVE_TRIANGLES);
+  const mat = new pc.StandardMaterial();
+  const c = b.color || [1, 0.82, 0.2];
+  mat.useLighting = false; mat.useSkybox = false;
+  mat.diffuse = new pc.Color(0, 0, 0);
+  mat.emissive = new pc.Color(c[0], c[1], c[2]);
+  mat.cull = pc.CULLFACE_NONE;
+  mat.update();
+  outline.addComponent('render', { meshInstances: [new pc.MeshInstance(mesh, mat)], layers: [], castShadows: false });
+  app.root.addChild(outline);
+})();
+
+function setBasemapVisible(on) {
+  basemapVisible = on;
+  $('bmBtn').classList.toggle('on', on);
+  refresh();
+}
+
+// ================================================================= epochs (splats)
+const cache = new Map();   // index -> { asset, entity, state, promise }
+let current = -1;          // single mode epoch (also the left side in compare mode)
+let compare = false;
+let sideL = 0, sideR = 0;
+let split = 0.5;
+
+function setStatus(text) {
+  $('status').classList.toggle('show', !!text);
+  if (text) $('statusText').textContent = text;
+}
+
+function load(i) {
+  if (cache.has(i)) return cache.get(i).promise;
+  const ep = epochs[i];
+  const asset = new pc.Asset(ep.label, 'gsplat', { url: ep.file });
+  const item = { asset, entity: null, state: 'loading', promise: null };
+  item.promise = new Promise((resolve, reject) => {
+    asset.ready(() => {
+      if (cache.get(i) !== item) return;
+      const entity = new pc.Entity('epoch-' + i);
+      entity.addComponent('gsplat', { asset, layers: [] });
+      entity.enabled = false;
+      modelRoot.addChild(entity);
+      item.entity = entity;
+      item.state = 'ready';
+      refresh();
+      resolve(item);
+    });
+    asset.once('error', (err) => { item.state = 'error'; renderChips(); reject(err); });
+  });
+  item.promise.catch(() => {});
+  cache.set(i, item);
+  app.assets.add(asset);
+  app.assets.load(asset);
+  renderChips();
+  return item.promise;
+}
+
+function wanted() {
+  const set = new Set();
+  if (compare) { set.add(sideL); set.add(sideR); }
+  else for (let d = -CACHE_RADIUS; d <= CACHE_RADIUS; d++) {
+    const j = current + d;
+    if (j >= 0 && j < epochs.length) set.add(j);
+  }
+  return set;
+}
+
+function evict() {
+  const keep = wanted();
+  for (const [i, item] of cache) {
+    if (keep.has(i)) continue;
+    cache.delete(i);
+    if (item.entity) item.entity.destroy();
+    app.assets.remove(item.asset);
+    item.asset.unload();
+  }
+  const keepRel = new Set([...keep].map((i) => releaseFor(i)?.id).filter((x) => x != null));
+  for (const id of [...basemaps.keys()]) if (!keepRel.has(id)) destroyBasemap(id);
+}
+
+// which side(s) each loaded splat / basemap is drawn on
+function refresh() {
+  const shown = compare ? [[sideL, layerL], [sideR, layerR]] : [[current, layerL]];
+  const ready = (i) => cache.get(i)?.state === 'ready';
+  for (const [i, item] of cache) {
+    if (!item.entity) continue;
+    const ids = shown.filter(([j]) => j === i).map(([, l]) => l.id);
+    item.entity.gsplat.layers = ids;
+    item.entity.enabled = ids.length > 0;
+  }
+  if (basemapOn && releases) {
+    const relLayers = new Map();
+    for (const [i, layer] of shown) {
+      const rel = releaseFor(i);
+      if (!rel || !ready(i)) continue;   // switch basemap together with the model
+      buildBasemap(rel);
+      if (!relLayers.has(rel.id)) relLayers.set(rel.id, []);
+      relLayers.get(rel.id).push(layer.id);
+    }
+    for (const [id, item] of basemaps) {
+      const ids = basemapVisible ? (relLayers.get(id) || []) : [];
+      item.layers = ids;
+      item.tiles.forEach((t) => { t.render.layers = ids; });
+      item.entity.enabled = ids.length > 0;
+    }
+  }
+  if (outline.render) {
+    outline.render.layers = basemapOn && basemapVisible ? (compare ? [layerL.id, layerR.id] : [layerL.id]) : [];
+  }
+  updateAttribution();
+  renderChips();
+}
+
+function updateAttribution() {
+  const showSat = basemapOn && basemapVisible;
+  document.querySelectorAll('.sat').forEach((el) => { el.style.display = showSat ? '' : 'none'; });
+  if (current >= 0) $('satNow').textContent = satText(current);
+  if (compare) { $('satL').textContent = satText(sideL); $('satR').textContent = satText(sideR); }
+  if (!showSat || !releases) { $('attrib').textContent = ''; return; }
+  const sides = compare ? [sideL, sideR] : [current];
+  const parts = [...new Set(sides.map((i) => {
+    const r = releaseFor(i);
+    return r ? (r.date ? `${r.label} ${fmtDate(r.date)}` : r.label) : null;
+  }).filter(Boolean))];
+  const credit = bm.credit ?? 'Esri, Maxar, Earthstar Geographics, and the GIS User Community';
+  $('attrib').innerHTML = '';
+  if (!parts.length) return;
+  const rel = document.createElement('span');
+  rel.className = 'rel';
+  rel.textContent = `衛星影像：${parts.join('｜')}　`;
+  $('attrib').append(rel, `Source: ${credit}`);
+}
+
+async function ensure(list) {
+  const need = list.filter((i) => cache.get(i)?.state !== 'ready');
+  if (need.length) setStatus(`載入 ${need.map((i) => epochs[i].label).join('、')} 中…`);
+  try {
+    await Promise.all(list.map(load));
+  } catch (err) {
+    setStatus(`載入失敗：${err}`);
+    console.error(err);
+    return false;
+  }
+  setStatus('');
+  return true;
+}
+
+async function show(i) {
+  if (i < 0 || i >= epochs.length) return;
+  current = i;
+  $('epochNow').textContent = epochs[i].label;
+  updateAttribution();
+  renderChips();
+  if (!(await ensure([i]))) return;
+  if (current !== i || compare) return;
+  refresh();
+  evict();
+  for (let d = 1; d <= CACHE_RADIUS; d++) {
+    for (const j of [i + d, i - d]) {
+      if (j >= 0 && j < epochs.length && current === i && !compare) {
+        try { await load(j); } catch (e) { /* shown on chip */ }
+      }
+    }
+  }
+}
+
+// ================================================================= compare mode
+function layoutSplit() {
+  camL.camera.scissorRect = new pc.Vec4(0, 0, split, 1);
+  camR.camera.scissorRect = new pc.Vec4(split, 0, 1 - split, 1);
+  $('divider').style.left = `${split * 100}%`;
+}
+
+async function showCompare() {
+  $('tagL').textContent = epochs[sideL].label;
+  $('tagR').textContent = epochs[sideR].label;
+  updateAttribution();
+  $('selL').value = sideL;
+  $('selR').value = sideR;
+  const l = sideL, r = sideR;
+  if (!(await ensure([l, r]))) return;
+  if (!compare || l !== sideL || r !== sideR) return;
+  refresh();
+  evict();
+}
+
+function setCompare(on) {
+  if (epochs.length < 2) return;
+  compare = on;
+  stopPlay();
+  document.body.classList.toggle('compare', on);
+  $('cmp').classList.toggle('on', on);
+  $('cmpLong').textContent = on ? '結束對照' : '左右對照';
+  $('cmpShort').textContent = on ? '結束' : '對照';
+  $('cmp').querySelector('.ico').textContent = on ? '✕' : '⇔';
+  if (on) {
+    sideR = current;
+    sideL = current > 0 ? current - 1 : 1;
+    if (sideL > sideR) [sideL, sideR] = [sideR, sideL];
+    camR.enabled = true;
+    layoutSplit();
+    showCompare();
+  } else {
+    camR.enabled = false;
+    camL.camera.scissorRect = new pc.Vec4(0, 0, 1, 1);
+    refresh();
+    show(current);
+  }
+}
+
+const handle = $('handle');
+handle.addEventListener('pointerdown', (e) => {
+  e.preventDefault(); e.stopPropagation();
+  handle.setPointerCapture(e.pointerId);
+  const move = (ev) => {
+    split = pc.math.clamp(ev.clientX / window.innerWidth, 0.03, 0.97);
+    layoutSplit();
+  };
+  const up = () => { handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', up); };
+  handle.addEventListener('pointermove', move);
+  handle.addEventListener('pointerup', up);
+});
+handle.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+
+const selOne = $('selOne');
+epochs.forEach((ep, i) => selOne.add(new Option(ep.label, i)));
+selOne.onchange = () => { stopPlay(); show(+selOne.value); };
+
+for (const id of ['selL', 'selR']) {
+  const sel = $(id);
+  epochs.forEach((ep, i) => sel.add(new Option(ep.label, i)));
+  sel.onchange = () => {
+    if (id === 'selL') sideL = +sel.value; else sideR = +sel.value;
+    showCompare();
+  };
+}
+
+// ================================================================= UI
+function renderChips() {
+  const box = $('chips');
+  if (box.children.length !== epochs.length) {
+    box.innerHTML = '';
+    epochs.forEach((ep, i) => {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.innerHTML = '<span class="dot"></span><span></span>';
+      b.lastChild.textContent = ep.label;
+      b.onclick = () => { stopPlay(); show(i); };
+      box.appendChild(b);
+    });
+  }
+  [...box.children].forEach((b, i) => {
+    const st = cache.get(i)?.state;
+    b.classList.toggle('active', i === current);
+    b.classList.toggle('ready', st === 'ready');
+    b.classList.toggle('loading', st === 'loading');
+    if (i === current && !compare) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+  if (current >= 0) selOne.value = current;
+  $('prev').disabled = current <= 0;
+  $('next').disabled = current >= epochs.length - 1;
+  $('cmp').disabled = epochs.length < 2;
+}
+
+let playTimer = null;
+function stopPlay() { clearInterval(playTimer); playTimer = null; $('play').classList.remove('on'); $('play').textContent = '播放'; }
+function startPlay() {
+  if (compare) return;
+  if (current >= epochs.length - 1) show(0);
+  $('play').classList.add('on'); $('play').textContent = '暫停';
+  playTimer = setInterval(() => {
+    if (cache.get(current)?.state !== 'ready') return;
+    if (current >= epochs.length - 1) { stopPlay(); return; }
+    show(current + 1);
+  }, PLAY_INTERVAL);
+}
+
+$('prev').onclick = () => { stopPlay(); show(current - 1); };
+$('next').onclick = () => { stopPlay(); show(current + 1); };
+$('play').onclick = () => (playTimer ? stopPlay() : startPlay());
+$('cmp').onclick = () => setCompare(!compare);
+$('bmBtn').onclick = () => setBasemapVisible(!basemapVisible);
+if (!basemapOn) $('bmBtn').style.display = 'none';
+$('reset').onclick = resetView;
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key === 'c' || e.key === 'C') setCompare(!compare);
+  else if (e.key === 'b' || e.key === 'B') setBasemapVisible(!basemapVisible);
+  else if (e.key === 'r' || e.key === 'R') resetView();
+  else if (compare) return;
+  else if (e.key === 'ArrowLeft') { stopPlay(); show(current - 1); }
+  else if (e.key === 'ArrowRight') { stopPlay(); show(current + 1); }
+  else if (e.key === ' ') { e.preventDefault(); playTimer ? stopPlay() : startPlay(); }
+});
+
+const r1 = (v) => Math.round(v * 10) / 10;
+function updateEditPanel() {
+  $('camText').textContent = JSON.stringify({
+    target: [r1(cam.target.x), r1(cam.target.y), r1(cam.target.z)],
+    yaw: r1(((cam.yaw % 360) + 360) % 360), pitch: r1(cam.pitch), distance: r1(cam.distance),
+    fov: camL.camera.fov
+  });
+}
+if (editMode) {
+  $('edit').classList.add('show');
+  $('copyCam').onclick = () => navigator.clipboard?.writeText($('camText').textContent);
+}
+
+window.viewer = { app, show, setCompare, cache, basemaps, get current() { return current; }, get releases() { return releases; }, releaseFor };
+applyCamera();
+renderChips();
+loadReleases().then((list) => { releases = list; refresh(); });
+if (epochs.length) show(config.startEpoch ?? epochs.length - 1);
+else setStatus('config.json 裡沒有任何期別');
+</script>
+</body>
+</html>

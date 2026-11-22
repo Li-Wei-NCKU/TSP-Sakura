@@ -1,0 +1,66 @@
+{
+  "title": "櫻花南科之櫻施工進度紀錄",
+  "titleLines": [
+    "櫻花南科之櫻",
+    "施工進度紀錄"
+  ],
+  "subtitle": "拖曳旋轉・右鍵或雙指平移・滾輪或雙指縮放",
+  "background": [
+    0.12,
+    0.13,
+    0.15
+  ],
+  "modelRotation": [
+    0,
+    0,
+    180
+  ],
+  "geo": {
+    "lat": 23.04606425,
+    "lon": 120.24927143
+  },
+  "groundY": -21.6,
+  "basemap": {
+    "source": "wayback",
+    "zoom": 18,
+    "radius": 600,
+    "brightness": 0.7
+  },
+  "modelBounds": {
+    "xmin": -100,
+    "xmax": 100,
+    "zmin": -90,
+    "zmax": 90,
+    "color": [
+      1,
+      0.82,
+      0.2
+    ],
+    "width": 0.8
+  },
+  "camera": {
+    "target": [
+      0,
+      0,
+      0
+    ],
+    "yaw": 35,
+    "pitch": -25,
+    "distance": 220,
+    "fov": 50
+  },
+  "epochs": [
+    {
+      "label": "113/11/23",
+      "file": "epochs/113-11-23.sog"
+    },
+    {
+      "label": "114/11/08",
+      "file": "epochs/114-11-08.sog"
+    },
+    {
+      "label": "115/11/21",
+      "file": "epochs/115-11-21.sog"
+    }
+  ]
+}
